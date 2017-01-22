@@ -1,0 +1,100 @@
+#!/bin/bash
+
+
+# return list of partitions, one per line
+get_all_partitions() {
+  blkid -o device
+}
+
+# returns the file system type of a partition
+# $1: device (partition)
+get_fs_type_of_partition() {
+  lsblk -r -o FSTYPE -d -n $1
+}
+
+# do a filesyste check
+do_fs_check() {
+  local fstype=$(get_fs_type_of_partition $1)
+  local rc
+  case $fstype in
+    vfat) do_vfat_check $1; rc=$? ;;
+    ext*) do_ext4_check $1; rc=$? ;;
+    LVM2_member) echo "$1 is part of LVM2, skipping..."; rc=0 ;;
+    *) echo "can't handle that type of filesystem: $fstype..." >&2 ; rc=255 ;;
+  esac
+  return $rc
+}
+
+############################################################################
+# The exit code returned by e2fsck is the sum of the following conditions:
+#      0    - No errors
+#      1    - File system errors corrected
+#      2    - File system errors corrected, system should
+#             be rebooted
+#      4    - File system errors left uncorrected
+#      8    - Operational error
+#      16   - Usage or syntax error
+#      32   - E2fsck canceled by user request
+#      128  - Shared library error
+############################################################################
+# check a fs
+# $1: device to check
+do_ext4_check() {
+  fsck.ext4 -f -y $1
+}
+
+do_vfat_check() {
+  fsck.vfat -a $1
+  case $? in
+    0) return 0;;
+    1) return 4;;
+    *) return 8;;
+  esac
+}
+
+get_error_type() {
+  case $1 in
+    0) echo -n -e "\Z2No errors";;
+    1) echo -n -e "\Z3File system errors corrected" ;;
+    2) echo -n -e "\Z3File system errors corrected, system should be rebooted" ;;
+    255) echo -n -e "\Z1Unrecognized partition" ;;
+    *) echo -n -e "\Z1File system errors left uncorrected" ;;
+  esac
+  echo "\Zn"
+}
+
+declare -A fsstatus
+canreboot=true
+vgchange -a y
+partitions=( `get_all_partitions` )
+i=1
+for partition in ${partitions[@]}; do
+  let percent=$i*100/${#partitions[@]}
+  dialog --mixedgauge "is being checked" 10 60 $percent $partition $i
+  do_fs_check $partition >/tmp/log 2>&1
+  fsstatus[$partition]=$?
+  if [ ${fsstatus[$partition]} -gt 2 ]; then
+    canreboot=false
+  fi
+  i=$((i+1))
+done
+
+output=""
+for i in "${!fsstatus[@]}"; do
+  output="$i: `get_error_type ${fsstatus[$i]}`\n$output"
+done
+
+
+grep "noreboot" /proc/cmdline
+if [ $? -eq 0 ]; then
+  canreboot=false
+fi
+
+vgchange -a n
+if [ "$canreboot" = 'true' ]; then
+  dialog --colors --infobox "$output\n\nSystem will restart..." $((${#partitions[@]}+10)) 60
+  sleep 60
+  reboot
+else
+  dialog --colors --msgbox "$output\n\n\Zb\Z1System must be repaired manually\Zn" $((${#partitions[@]}+10)) 60
+fi
