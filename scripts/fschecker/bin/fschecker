@@ -20,6 +20,8 @@ do_fs_check() {
     vfat) do_vfat_check $1; rc=$? ;;
     ext*) do_ext4_check $1; rc=$? ;;
     LVM2_member) echo "$1 is part of LVM2, skipping..."; rc=0 ;;
+    xfs)  do_xfs_check $1; rc=$? ;;
+    f2fs) do_f2fs_check $1; rc=$? ;;
     *) echo "can't handle that type of filesystem: $fstype..." >&2 ; rc=255 ;;
   esac
   return $rc
@@ -49,6 +51,22 @@ do_vfat_check() {
     0) return 0;;
     1) return 4;;
     *) return 8;;
+  esac
+}
+
+do_xfs_check() {
+  xfs_repair -n $1
+  case $? in
+    0) return 0;;
+    1) return 4;;
+  esac
+}
+
+do_f2fs_check() {
+  fsck.f2fs -a -f $1 >/tmp/fschecker.$$ # need to parse f2fs output
+  case $? in
+    0) grep -q "No error was reported" /tmp/fschecker.$$ && return 0 || return 1;;
+    *) return 4;;
   esac
 }
 
