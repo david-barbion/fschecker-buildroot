@@ -23,6 +23,7 @@ do_fs_check() {
     f2fs)  do_f2fs_check $1;  rc=$? ;;
     btrfs) do_btrfs_check $1; rc=$? ;;
     LVM2_member) echo "$1 is part of LVM2, skipping..."; rc=0 ;;
+    ntfs)  do_ntfs_check $1; rc=$? ;;
     *) echo "can't handle that type of filesystem: $fstype..." >&2 ; rc=255 ;;
   esac
   return $rc
@@ -73,6 +74,13 @@ do_f2fs_check() {
 
 do_btrfs_check() {
   btrfsck -p $1 >/tmp/fschecker.$$
+  case $? in
+    0) return 0;;
+    *) return 4;;
+  esac
+}
+do_ntfs_check() {
+  ntfsfix $1 >/tmp/fschecker.$$
   case $? in
     0) return 0;;
     *) return 4;;
